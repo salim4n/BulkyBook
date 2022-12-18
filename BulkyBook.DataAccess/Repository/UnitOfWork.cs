@@ -22,7 +22,8 @@ namespace BulkyBook.DataAccess.Repository
         public ICategoryRepository Category { get; private set; }
         public ICoverTypeRepository CoverType { get; private set; }
         public IProductRepository Product { get; private set; }
-        
+        public ICompanyRepository CompanyRepository { get; private set; }
+
         public void Save()
         {
             _db.SaveChanges();

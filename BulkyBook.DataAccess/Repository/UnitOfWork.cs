@@ -9,7 +9,7 @@ namespace BulkyBook.DataAccess.Repository
 {
     public class UnitOfWork : IUnitOfWork
     {
-        private readonly ApplicationDbContext _db;
+        private  ApplicationDbContext _db;
 
         public UnitOfWork(ApplicationDbContext db)
         {

@@ -24,6 +24,8 @@ namespace BulkyBook.Models
 		public double OrderTotal { get; set; }
 		public string? OrderStatus { get; set; }
 		public string? PaymentStatus { get; set; }
+		public string? TrackingNumber { get; set; }
+		public string? Carrier { get; set; }
 		public DateTime PaymentDate { get; set; }
 		public DateTime PaymentDueDate { get; set; }
 		public string? SessionId { get; set; }

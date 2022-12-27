@@ -3,6 +3,7 @@ using BulkyBook.Models;
 using BulkyBook.Models.ViewModels;
 using BulkyBook.Utility;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using NuGet.Protocol;
@@ -17,17 +18,19 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
     public class CartController : Controller
     {
         private readonly IUnitOfWork _unitOfWork;
+        private readonly IEmailSender _emailSender;
 
         [BindProperty]
         public ShoppingCartVM ShoppingCartVM { get; set; }
         public int OrderTotal { get; set; }
 
-        public CartController(IUnitOfWork unitOfWork)
-		{
-			_unitOfWork = unitOfWork;
-		}
+        public CartController(IUnitOfWork unitOfWork, IEmailSender emailSender)
+        {
+            _unitOfWork = unitOfWork;
+            _emailSender = emailSender;
+        }
 
-		public IActionResult Index()
+        public IActionResult Index()
         {
             var claimsIdentity = (ClaimsIdentity)User.Identity;
             var claim = claimsIdentity.FindFirst(ClaimTypes.NameIdentifier);
@@ -80,39 +83,43 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
         [HttpPost]
         [ActionName("Summary")]
         [ValidateAntiForgeryToken]
-		public IActionResult SummaryPOST()
-		{
-			var claimsIdentity = (ClaimsIdentity)User.Identity;
-			var claim = claimsIdentity.FindFirst(ClaimTypes.NameIdentifier);
+        public IActionResult SummaryPOST()
+        {
+            var claimsIdentity = (ClaimsIdentity)User.Identity;
+            var claim = claimsIdentity.FindFirst(ClaimTypes.NameIdentifier);
 
-            ShoppingCartVM.ListCart = _unitOfWork.ShoppingCart.GetAll(u => u.ApplicationUserId == claim.Value, includeProperties: "Product");
+            ShoppingCartVM.ListCart = _unitOfWork.ShoppingCart.GetAll(u => u.ApplicationUserId == claim.Value,
+                includeProperties: "Product");
 
 
+            ShoppingCartVM.OrderHeader.OrderDate = System.DateTime.Now;
+            ShoppingCartVM.OrderHeader.ApplicationUserId = claim.Value;
 
 
-			foreach (var cart in ShoppingCartVM.ListCart)
-			{
-				cart.Price = GetPriceBasedOnQuantity(cart.Count, cart.Product.Price, cart.Product.Price50, cart.Product.Price100);
-				ShoppingCartVM.OrderHeader.OrderTotal += (cart.Price * cart.Count);
-			}
+            foreach (var cart in ShoppingCartVM.ListCart)
+            {
+                cart.Price = GetPriceBasedOnQuantity(cart.Count, cart.Product.Price,
+                    cart.Product.Price50, cart.Product.Price100);
+                ShoppingCartVM.OrderHeader.OrderTotal += (cart.Price * cart.Count);
+            }
+            ApplicationUser applicationUser = _unitOfWork.ApplicationUser.GetFirstOrDefault(u => u.Id == claim.Value);
 
-			ApplicationUser applicationUser = _unitOfWork.ApplicationUser.GetFirstOrDefault(a => a.Id == claim.Value);
-			if (applicationUser.CompanyId.GetValueOrDefault() == 0)
-			{
-				ShoppingCartVM.OrderHeader.PaymentStatus = SD.PaymentStatusPending;
-				ShoppingCartVM.OrderHeader.OrderStatus = SD.StatusPending;
-			}
+            if (applicationUser.CompanyId.GetValueOrDefault() == 0)
+            {
+                ShoppingCartVM.OrderHeader.PaymentStatus = SD.PaymentStatusPending;
+                ShoppingCartVM.OrderHeader.OrderStatus = SD.StatusPending;
+            }
             else
             {
-				ShoppingCartVM.OrderHeader.OrderDate = DateTime.Now;
-				ShoppingCartVM.OrderHeader.ApplicationUserId = claim.Value;
-			}
+                ShoppingCartVM.OrderHeader.PaymentStatus = SD.PaymentStatusDelayedPayment;
+                ShoppingCartVM.OrderHeader.OrderStatus = SD.StatusApproved;
+            }
 
-			_unitOfWork.OrderHeader.Add(ShoppingCartVM.OrderHeader);
+            _unitOfWork.OrderHeader.Add(ShoppingCartVM.OrderHeader);
             _unitOfWork.Save();
-			
 
-			foreach (var cart in ShoppingCartVM.ListCart)
+
+            foreach (var cart in ShoppingCartVM.ListCart)
 			{
                 OrderDetails orderDetails = new()
                 {
@@ -180,7 +187,7 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
 
         public IActionResult OrderConfirmation(int id)
         {
-            OrderHeader orderHeader = _unitOfWork.OrderHeader.GetFirstOrDefault(o => o.Id == id);
+            OrderHeader orderHeader = _unitOfWork.OrderHeader.GetFirstOrDefault(o => o.Id == id, includeProperties: "ApplicationUser");
             if(orderHeader.PaymentStatus != SD.PaymentStatusDelayedPayment)
             {
 				var service = new SessionService();
@@ -193,6 +200,8 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
 					_unitOfWork.Save();
 				}
 			}
+
+            _emailSender.SendEmailAsync(orderHeader.ApplicationUser.Email, "Bulky Book - New Order", "<p> new order created ! Thank's you bro! </p>");
 			
 
             List<ShoppingCart> shoppingCarts = _unitOfWork.ShoppingCart
@@ -218,6 +227,10 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
             if(cart.Count <= 1)
             {
                 _unitOfWork.ShoppingCart.Remove(cart);
+                var count = _unitOfWork.ShoppingCart.GetAll(sc => sc.ApplicationUserId == cart.ApplicationUserId)
+                                                    .ToList().Count - 1;
+
+                HttpContext.Session.SetInt32(SD.SessionCart, count);
             }
             else
             {
@@ -233,6 +246,10 @@ namespace BulkyBookWeb.Areas.Customer.Controllers
 			var cart = _unitOfWork.ShoppingCart.GetFirstOrDefault(u => u.Id == cartId);
 			_unitOfWork.ShoppingCart.Remove(cart);
 			_unitOfWork.Save();
+            var count = _unitOfWork.ShoppingCart.GetAll(sc => sc.ApplicationUserId == cart.ApplicationUserId)
+                                                .ToList().Count;
+
+            HttpContext.Session.SetInt32(SD.SessionCart, count);
 			return RedirectToAction(nameof(Index));
 		}
 
